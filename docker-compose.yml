@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: xieshang-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: xieshang_user
+      POSTGRES_PASSWORD: xieshang_password
+      POSTGRES_DB: xieshang_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
