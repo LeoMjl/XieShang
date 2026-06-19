@@ -1,19 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, ArrowLeft, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Check, Loader2, Sparkles } from 'lucide-react'
 
+import { apiUpload, type TryonRecord } from '@/api/xieshang'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { useAppStore } from '@/store'
-import { apiUpload } from '@/api/xieshang'
 
-function createId() {
-  return `${Date.now()}_${Math.random().toString(16).slice(2)}`
+interface WsResult {
+  status: 'success' | 'error' | 'progress'
+  message?: string
+  node?: string
+  record_id?: number
+  avatar_url?: string
+  styling_suggestion?: string
+  generated_product_url?: string
+  final_tryon_url?: string
+}
+
+const nodeLabels: Record<string, string> = {
+  profiling: '识别体型与风格特征',
+  styling: '生成穿搭建议',
+  product_generation: '生成商品图',
+  tryon: '合成试穿效果',
 }
 
 export default function LoadingPage() {
   const navigate = useNavigate()
+  const wsRef = useRef<WebSocket | null>(null)
   const {
     userId,
     pendingTask,
@@ -22,36 +35,20 @@ export default function LoadingPage() {
     isLoading,
     loadingStage,
     setLoadingStage,
-    error,
     setError,
+    error,
     setBaseAvatarUrl,
     setLastResult,
-    addHistory,
+    addRecentRecord,
   } = useAppStore()
-
-  const wsRef = useRef<WebSocket | null>(null)
-  // 用于手动模拟某些步骤的完成，如果后端颗粒度不够细
-  const [completedSteps, setCompletedSteps] = useState<number[]>([])
+  const [done, setDone] = useState<number[]>([])
 
   const steps = useMemo(() => {
-    if (!pendingTask) return ['准备中...']
-    if (pendingTask.type === 'onboarding') {
-      return ['正在分析照片与体型特征', '正在生成全身基底形象']
-    }
-    if (pendingTask.type === 'recommendation') {
-      return ['正在读取你的固化形象', '正在生成穿搭建议与商品图', '正在合成试穿效果']
-    }
-    return ['正在读取你的固化形象', '正在解析商品图片', '正在合成试穿效果']
+    if (!pendingTask) return ['准备任务']
+    if (pendingTask.type === 'onboarding') return ['上传人物照片', '识别体型特征', '固化专属形象']
+    if (pendingTask.type === 'recommendation') return ['读取专属形象', '生成穿搭建议', '合成试穿效果']
+    return ['准备商品图', '解析商品特征', '合成试穿效果']
   }, [pendingTask])
-
-  const tips = useMemo(
-    () => [
-      '小贴士：照片越清晰，后续试穿效果越稳定。',
-      '小贴士：描述场景越具体，推荐越贴合。',
-      '小贴士：你可以先用测试用户 ID 快速体验流程。',
-    ],
-    []
-  )
 
   useEffect(() => {
     if (!pendingTask) {
@@ -63,126 +60,142 @@ export default function LoadingPage() {
     setError(null)
     setIsLoading(true)
     setLoadingStage(0)
-    setCompletedSteps([])
+
+    const mark = (index: number) => {
+      setDone((prev) => (prev.includes(index) ? prev : [...prev, index]))
+      setLoadingStage(Math.min(index + 1, steps.length - 1))
+    }
 
     const run = async () => {
       try {
-        let fileUrl = ''
-        // Step 1: 如果有文件，先通过 HTTP 上传
+        let fileUrl = pendingTask.type === 'directTryon' ? pendingTask.payload.fileUrl || '' : ''
         if ('file' in pendingTask.payload && pendingTask.payload.file) {
-          const res = await apiUpload(pendingTask.payload.file)
+          const upload = await apiUpload(pendingTask.payload.file)
           if (cancelled) return
-          fileUrl = res.url
-          // 上传完成，如果是直接试穿，第一步算完成
-          if (pendingTask.type === 'directTryon') {
-            setCompletedSteps((prev) => [...prev, 0, 1])
-            setLoadingStage(2)
-          } else if (pendingTask.type === 'onboarding') {
-            // 上传只是开始
-          }
-        } else {
-          // recommendation 没有文件，第一步“读取固化形象”可以直接算完成
-          if (pendingTask.type === 'recommendation') {
-            setCompletedSteps((prev) => [...prev, 0])
-            setLoadingStage(1)
-          }
+          fileUrl = upload.url
+          mark(0)
+        } else if (fileUrl) {
+          mark(0)
+        } else if (pendingTask.type === 'recommendation') {
+          mark(0)
         }
 
-        // Step 2: 连接 WebSocket 获取进度和结果
-        const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-        const wsUrl = baseUrl.replace(/^http/, 'ws') + '/ws/process'
-        const ws = new WebSocket(wsUrl)
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
+        const ws = new WebSocket(`${baseUrl.replace(/^http/, 'ws')}/ws/process`)
         wsRef.current = ws
 
         ws.onopen = () => {
           if (pendingTask.type === 'onboarding') {
-            ws.send(JSON.stringify({
-              type: 'onboarding',
-              user_id: userId,
-              height: pendingTask.payload.height,
-              weight: pendingTask.payload.weight,
-              file_url: fileUrl
-            }))
+            ws.send(
+              JSON.stringify({
+                type: 'onboarding',
+                user_id: userId,
+                height: pendingTask.payload.height,
+                weight: pendingTask.payload.weight,
+                file_url: fileUrl,
+              })
+            )
           } else if (pendingTask.type === 'recommendation') {
-            ws.send(JSON.stringify({
-              type: 'recommendation',
-              user_id: userId,
-              query: pendingTask.payload.query
-            }))
-          } else if (pendingTask.type === 'directTryon') {
-            ws.send(JSON.stringify({
-              type: 'direct-tryon',
-              user_id: userId,
-              file_url: fileUrl
-            }))
+            ws.send(
+              JSON.stringify({
+                type: 'recommendation',
+                user_id: userId,
+                query: pendingTask.payload.query,
+                scene: pendingTask.payload.scene,
+              })
+            )
+          } else {
+            ws.send(
+              JSON.stringify({
+                type: 'direct-tryon',
+                user_id: userId,
+                file_url: fileUrl,
+                scene: pendingTask.payload.scene,
+                item_name: pendingTask.payload.itemName,
+                category: pendingTask.payload.category,
+                save_to_wardrobe: pendingTask.payload.saveToWardrobe,
+              })
+            )
           }
         }
 
         ws.onmessage = (event) => {
-          const data = JSON.parse(event.data)
+          const data = JSON.parse(event.data) as WsResult
           if (data.status === 'error') {
-            setError(data.message)
+            setError(data.message || 'AI 处理失败')
             setIsLoading(false)
             ws.close()
-          } else if (data.status === 'progress') {
-            const node = data.node
-            if (pendingTask.type === 'onboarding') {
-              if (node === 'profiling') {
-                setCompletedSteps((prev) => [...prev, 0])
-                setLoadingStage(1)
+            return
+          }
+
+          if (data.status === 'progress') {
+            const label = data.node ? nodeLabels[data.node] : undefined
+            if (label) {
+              if (pendingTask.type === 'onboarding') mark(1)
+              if (pendingTask.type === 'recommendation' || pendingTask.type === 'directTryon') {
+                mark(data.node === 'tryon' ? 2 : 1)
               }
-            } else if (pendingTask.type === 'recommendation') {
-              if (node === 'styling') {
-                setCompletedSteps((prev) => [...prev, 1])
-                setLoadingStage(2)
-              }
-            } else if (pendingTask.type === 'directTryon') {
-               // ...
             }
-          } else if (data.status === 'success') {
-            // 完成所有步骤
-            setCompletedSteps((prev) => [...prev, 0, 1, 2, 3])
-            
-            setTimeout(() => {
+            return
+          }
+
+          if (data.status === 'success') {
+            setDone(steps.map((_, index) => index))
+            window.setTimeout(() => {
               if (cancelled) return
               if (pendingTask.type === 'onboarding') {
-                setBaseAvatarUrl(data.avatar_url)
-                setLastResult({ type: 'onboarding', avatarUrl: data.avatar_url })
-                setPendingTask(null)
-                navigate('/result')
+                const avatarUrl = data.avatar_url || ''
+                setBaseAvatarUrl(avatarUrl)
+                setLastResult({ type: 'onboarding', avatarUrl, recordId: data.record_id })
               } else if (pendingTask.type === 'recommendation') {
+                const record: TryonRecord = {
+                  id: data.record_id || Date.now(),
+                  user_id: userId,
+                  type: 'recommendation',
+                  scene: pendingTask.payload.scene,
+                  product_url: data.generated_product_url,
+                  styling_suggestion: data.styling_suggestion,
+                  generated_product_url: data.generated_product_url,
+                  final_tryon_url: data.final_tryon_url,
+                  created_at: new Date().toISOString(),
+                }
+                addRecentRecord(record)
                 setLastResult({
                   type: 'recommendation',
-                  stylingSuggestion: data.styling_suggestion,
-                  generatedProductUrl: data.generated_product_url,
-                  finalTryonUrl: data.final_tryon_url,
+                  stylingSuggestion: data.styling_suggestion || '已生成专属穿搭建议。',
+                  generatedProductUrl: data.generated_product_url || '',
+                  finalTryonUrl: data.final_tryon_url || '',
+                  scene: pendingTask.payload.scene,
+                  recordId: data.record_id,
                 })
-                addHistory({
-                  id: createId(),
-                  type: 'recommendation',
-                  finalTryonUrl: data.final_tryon_url,
-                  timestamp: Date.now(),
-                })
-                setPendingTask(null)
-                navigate('/', { state: { previewImage: data.final_tryon_url } })
-              } else if (pendingTask.type === 'directTryon') {
-                setLastResult({ type: 'directTryon', finalTryonUrl: data.final_tryon_url })
-                addHistory({
-                  id: createId(),
+              } else {
+                const record: TryonRecord = {
+                  id: data.record_id || Date.now(),
+                  user_id: userId,
+                  type: 'direct_tryon',
+                  scene: pendingTask.payload.scene,
+                  product_url: fileUrl || data.generated_product_url,
+                  final_tryon_url: data.final_tryon_url,
+                  created_at: new Date().toISOString(),
+                }
+                addRecentRecord(record)
+                setLastResult({
                   type: 'directTryon',
-                  finalTryonUrl: data.final_tryon_url,
-                  timestamp: Date.now(),
+                  finalTryonUrl: data.final_tryon_url || '',
+                  productUrl: fileUrl || undefined,
+                  scene: pendingTask.payload.scene,
+                  recordId: data.record_id,
                 })
-                setPendingTask(null)
-                navigate('/', { state: { previewImage: data.final_tryon_url } })
               }
-            }, 500)
+              setPendingTask(null)
+              navigate('/result')
+            }, 450)
           }
         }
 
         ws.onerror = () => {
-          if (!cancelled && isLoading) {
-            setError('WebSocket 连接失败，请检查后端是否正常运行。')
+          if (!cancelled) {
+            setError('WebSocket 连接失败，请确认后端服务正在运行')
             setIsLoading(false)
           }
         }
@@ -190,12 +203,12 @@ export default function LoadingPage() {
         ws.onclose = () => {
           if (!cancelled) setIsLoading(false)
         }
-
-      } catch (e: any) {
-        if (cancelled) return
-        const msg = e?.response?.data?.detail || e?.message || '请求失败，请确认后端已启动'
-        setError(String(msg))
-        setIsLoading(false)
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : '请求失败'
+          setError(message)
+          setIsLoading(false)
+        }
       }
     }
 
@@ -203,12 +216,10 @@ export default function LoadingPage() {
 
     return () => {
       cancelled = true
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
+      wsRef.current?.close()
     }
   }, [
-    addHistory,
+    addRecentRecord,
     navigate,
     pendingTask,
     setBaseAvatarUrl,
@@ -217,98 +228,68 @@ export default function LoadingPage() {
     setLastResult,
     setLoadingStage,
     setPendingTask,
+    steps,
     userId,
   ])
 
-  const [tipIndex, setTipIndex] = useState(0)
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTipIndex((prev) => (prev + 1) % tips.length)
-    }, 3000)
-    return () => clearInterval(timer)
-  }, [tips.length])
-  
-  const currentTip = tips[tipIndex]
-
   return (
-    <div className='min-h-dvh bg-gradient-to-b from-zinc-50 to-white'>
-      <div className='mx-auto max-w-md px-4 py-6'>
-        <div className='mb-4 flex items-center justify-between'>
-          <button
-            className='inline-flex items-center gap-2 text-sm text-zinc-600'
-            onClick={() => {
-              setPendingTask(null)
-              navigate('/')
-            }}
-            type='button'
-          >
-            <ArrowLeft className='h-4 w-4' />
-            返回
-          </button>
-          <div className='text-xs text-zinc-500'>沉浸式加载</div>
+    <div className="min-h-dvh bg-[#f4f0ff] text-slate-900">
+      <main className="mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-[linear-gradient(180deg,#ece4ff_0%,#ffffff_100%)] px-4 py-5">
+        <button
+          className="mb-8 flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm"
+          onClick={() => {
+            setPendingTask(null)
+            navigate('/')
+          }}
+          type="button"
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+
+        <div className="flex flex-1 flex-col items-center justify-center text-center">
+          <div className="relative mb-8 grid h-32 w-32 place-items-center rounded-full bg-white shadow-[0_20px_60px_rgba(109,87,217,0.22)]">
+            <div className="absolute inset-3 rounded-full border-2 border-dashed border-[#9b8cf0]" />
+            <Sparkles className="h-12 w-12 text-[#6d57d9]" />
+            {isLoading ? <Loader2 className="absolute -right-1 top-2 h-8 w-8 animate-spin text-[#3f9db9]" /> : null}
+          </div>
+
+          <h1 className="text-2xl font-semibold text-slate-950">AI 正在为你搭配</h1>
+          <p className="mt-2 max-w-xs text-sm leading-6 text-slate-500">正在处理图片与场景信息，生成结果后会自动跳转。</p>
+
+          <div className="mt-8 w-full space-y-3">
+            {steps.map((step, index) => {
+              const active = loadingStage === index
+              const completed = done.includes(index)
+              return (
+                <div
+                  className={`flex items-center gap-3 rounded-lg px-3 py-3 text-left text-sm shadow-sm ${
+                    active ? 'bg-[#6d57d9] text-white' : 'bg-white text-slate-600'
+                  }`}
+                  key={step}
+                >
+                  <div className={`grid h-7 w-7 place-items-center rounded-full ${completed ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {completed ? <Check className="h-4 w-4" /> : index + 1}
+                  </div>
+                  <span className="min-w-0 flex-1">{step}</span>
+                </div>
+              )
+            })}
+          </div>
+
+          {error ? <div className="mt-6 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className='text-base'>AI 正在处理</CardTitle>
-            <CardDescription>这一步通常需要几秒到几十秒</CardDescription>
-          </CardHeader>
-          <CardContent className='space-y-4'>
-            <div className='flex items-center gap-2 rounded-md border bg-white px-3 py-2'>
-              <Loader2 className='h-4 w-4 animate-spin text-zinc-700' />
-              <div className='text-sm text-zinc-800'>
-                {steps[Math.min(loadingStage, steps.length - 1)]}
-              </div>
-            </div>
-
-            <div className='space-y-2'>
-              {steps.map((s, idx) => {
-                const isCompleted = completedSteps.includes(idx)
-                const isActive = idx === loadingStage
-                return (
-                  <div
-                    key={s}
-                    className={`flex items-center justify-between rounded-md px-3 py-2 text-xs ${
-                      isActive
-                        ? 'bg-zinc-900 text-white'
-                        : isCompleted
-                        ? 'bg-green-50 text-green-700 border border-green-100'
-                        : 'bg-zinc-50 text-zinc-500'
-                    }`}
-                  >
-                    <span>{idx + 1}. {s}</span>
-                    {isCompleted && <CheckCircle2 className="h-4 w-4 text-green-600" />}
-                  </div>
-                )
-              })}
-            </div>
-
-            <div className='rounded-md border bg-zinc-50 px-3 py-2 text-xs text-zinc-600'>
-              {currentTip}
-            </div>
-
-            {error ? (
-              <Alert className='border-red-200 bg-red-50'>
-                <AlertTitle className='text-red-700'>处理失败</AlertTitle>
-                <AlertDescription className='text-red-700'>{error}</AlertDescription>
-              </Alert>
-            ) : null}
-
-            <Button
-              variant='secondary'
-              className='w-full'
-              disabled={isLoading}
-              onClick={() => {
-                setPendingTask(null)
-                navigate('/')
-              }}
-            >
-              返回重新填写
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+        <Button
+          className="mb-3 w-full rounded-full bg-slate-950 text-white hover:bg-slate-800"
+          disabled={isLoading && !error}
+          onClick={() => {
+            setPendingTask(null)
+            navigate('/')
+          }}
+        >
+          返回首页
+        </Button>
+      </main>
     </div>
   )
 }
-

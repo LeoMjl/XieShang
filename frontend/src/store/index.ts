@@ -1,12 +1,7 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
-interface TryonHistory {
-  id: string
-  type: 'recommendation' | 'directTryon'
-  originalProductUrl?: string
-  finalTryonUrl: string
-  timestamp: number
-}
+import type { TryonRecord, UserProfile } from '@/api/xieshang'
 
 type PendingTask =
   | {
@@ -21,12 +16,18 @@ type PendingTask =
       type: 'recommendation'
       payload: {
         query: string
+        scene?: string
       }
     }
   | {
       type: 'directTryon'
       payload: {
-        file: File
+        file?: File
+        fileUrl?: string
+        scene?: string
+        itemName?: string
+        category?: string
+        saveToWardrobe?: boolean
       }
     }
 
@@ -34,21 +35,31 @@ type LastResult =
   | {
       type: 'onboarding'
       avatarUrl: string
+      recordId?: number
     }
   | {
       type: 'recommendation'
       stylingSuggestion: string
       generatedProductUrl: string
       finalTryonUrl: string
+      scene?: string
+      recordId?: number
     }
   | {
       type: 'directTryon'
       finalTryonUrl: string
+      productUrl?: string
+      scene?: string
+      recordId?: number
     }
 
 interface AppState {
   userId: string
+  nickname: string
+  userProfile: UserProfile | null
+  setSession: (profile: UserProfile) => void
   setUserId: (id: string) => void
+  setNickname: (name: string) => void
 
   baseAvatarUrl: string | null
   setBaseAvatarUrl: (url: string | null) => void
@@ -71,37 +82,71 @@ interface AppState {
   lastResult: LastResult | null
   setLastResult: (r: LastResult | null) => void
 
-  history: TryonHistory[]
-  addHistory: (item: TryonHistory) => void
-  clearHistory: () => void
+  recentRecords: TryonRecord[]
+  setRecentRecords: (records: TryonRecord[]) => void
+  addRecentRecord: (item: TryonRecord) => void
+  clearRecentRecords: () => void
 }
 
-export const useAppStore = create<AppState>((set) => ({
-  userId: 'test_user_001',
-  setUserId: (id) => set({ userId: id }),
+const defaultUserId = `demo_${Math.random().toString(16).slice(2, 8)}`
 
-  baseAvatarUrl: null,
-  setBaseAvatarUrl: (url) => set({ baseAvatarUrl: url }),
-  height: '',
-  setHeight: (h) => set({ height: h }),
-  weight: '',
-  setWeight: (w) => set({ weight: w }),
+export const useAppStore = create<AppState>()(
+  persist(
+    (set) => ({
+      userId: defaultUserId,
+      nickname: '小鹿',
+      userProfile: null,
+      setSession: (profile) =>
+        set({
+          userProfile: profile,
+          userId: profile.user_id,
+          nickname: profile.nickname || '小鹿',
+          baseAvatarUrl: profile.base_avatar_url || null,
+          height: profile.height ? String(profile.height) : '',
+          weight: profile.weight ? String(profile.weight) : '',
+        }),
+      setUserId: (id) => set({ userId: id }),
+      setNickname: (name) => set({ nickname: name }),
 
-  pendingTask: null,
-  setPendingTask: (task) => set({ pendingTask: task }),
+      baseAvatarUrl: null,
+      setBaseAvatarUrl: (url) => set({ baseAvatarUrl: url }),
+      height: '',
+      setHeight: (h) => set({ height: h }),
+      weight: '',
+      setWeight: (w) => set({ weight: w }),
 
-  isLoading: false,
-  setIsLoading: (v) => set({ isLoading: v }),
-  loadingStage: 0,
-  setLoadingStage: (idx) => set({ loadingStage: idx }),
+      pendingTask: null,
+      setPendingTask: (task) => set({ pendingTask: task }),
 
-  error: null,
-  setError: (msg) => set({ error: msg }),
+      isLoading: false,
+      setIsLoading: (v) => set({ isLoading: v }),
+      loadingStage: 0,
+      setLoadingStage: (idx) => set({ loadingStage: idx }),
 
-  lastResult: null,
-  setLastResult: (r) => set({ lastResult: r }),
+      error: null,
+      setError: (msg) => set({ error: msg }),
 
-  history: [],
-  addHistory: (item) => set((state) => ({ history: [item, ...state.history] })),
-  clearHistory: () => set({ history: [] }),
-}))
+      lastResult: null,
+      setLastResult: (r) => set({ lastResult: r }),
+
+      recentRecords: [],
+      setRecentRecords: (records) => set({ recentRecords: records }),
+      addRecentRecord: (item) => set((state) => ({ recentRecords: [item, ...state.recentRecords].slice(0, 12) })),
+      clearRecentRecords: () => set({ recentRecords: [] }),
+    }),
+    {
+      name: 'xieshang-app-state',
+      partialize: (state) => ({
+        userId: state.userId,
+        nickname: state.nickname,
+        userProfile: state.userProfile,
+        baseAvatarUrl: state.baseAvatarUrl,
+        height: state.height,
+        weight: state.weight,
+        recentRecords: state.recentRecords,
+      }),
+    }
+  )
+)
+
+export type { LastResult, PendingTask }

@@ -1,44 +1,48 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, ExternalLink, Download, Copy, Check } from 'lucide-react'
+import { ArrowLeft, Check, Copy, Download, Home, RotateCcw, Sparkles } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Separator } from '@/components/ui/separator'
 import { useAppStore } from '@/store'
 
-function canRenderUrl(url: string) {
-  return /^https?:\/\//i.test(url)
+function canPreview(url?: string) {
+  return Boolean(url && (/^https?:\/\//i.test(url) || url.startsWith('/')))
 }
 
-function LinkRow({ url }: { url: string }) {
+function CopyButton({ value }: { value?: string }) {
   const [copied, setCopied] = useState(false)
-
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+  if (!value) return null
 
   return (
-    <div className='flex items-center gap-3'>
-      <a
-        href={url}
-        target='_blank'
-        rel='noreferrer'
-        className='inline-flex items-center gap-2 text-sm text-zinc-700 underline-offset-4 hover:underline'
-      >
-        <ExternalLink className='h-4 w-4' />
-        打开链接
-      </a>
-      <button
-        onClick={() => handleCopy(url)}
-        className='inline-flex items-center gap-2 text-sm text-zinc-700 underline-offset-4 hover:underline'
-      >
-        {copied ? <Check className='h-4 w-4' /> : <Copy className='h-4 w-4' />}
-        {copied ? '已复制' : '一键复制'}
-      </button>
+    <button
+      className="flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm"
+      type="button"
+      onClick={() => {
+        navigator.clipboard.writeText(value)
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1600)
+      }}
+    >
+      {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+      {copied ? '已复制' : '复制链接'}
+    </button>
+  )
+}
+
+function ImagePanel({ title, url }: { title: string; url?: string }) {
+  return (
+    <div className="overflow-hidden rounded-lg bg-white shadow-sm">
+      <div className="flex items-center justify-between px-3 py-3">
+        <div className="text-sm font-semibold text-slate-950">{title}</div>
+        <CopyButton value={url} />
+      </div>
+      {canPreview(url) ? (
+        <img src={url} alt={title} className="max-h-[520px] w-full bg-slate-50 object-contain" />
+      ) : (
+        <div className="px-3 pb-3">
+          <div className="rounded-lg bg-slate-50 px-3 py-10 text-center text-xs text-slate-500">{url || '暂无图片'}</div>
+        </div>
+      )}
     </div>
   )
 }
@@ -46,168 +50,96 @@ function LinkRow({ url }: { url: string }) {
 export default function ResultPage() {
   const navigate = useNavigate()
   const { lastResult, setLastResult } = useAppStore()
-  const [imgError, setImgError] = useState<Record<string, boolean>>({})
 
-  const title = useMemo(() => {
-    if (!lastResult) return '暂无结果'
-    if (lastResult.type === 'onboarding') return '形象固化完成'
-    if (lastResult.type === 'recommendation') return '推荐试穿结果'
-    return '指定商品试穿结果'
-  }, [lastResult])
+  const title = !lastResult
+    ? '暂无结果'
+    : lastResult.type === 'onboarding'
+      ? '形象固化完成'
+      : lastResult.type === 'recommendation'
+        ? '推荐试穿完成'
+        : '指定商品试穿完成'
 
   return (
-    <div className='min-h-dvh bg-gradient-to-b from-zinc-50 to-white'>
-      <div className='mx-auto max-w-md px-4 py-6 md:max-w-3xl'>
-        <div className='mb-4 flex items-center justify-between'>
-          <button
-            className='inline-flex items-center gap-2 text-sm text-zinc-600'
-            onClick={() => navigate('/')}
-            type='button'
-          >
-            <ArrowLeft className='h-4 w-4' />
-            返回需求收集
+    <div className="min-h-dvh bg-[#f4f0ff] text-slate-900">
+      <main className="mx-auto min-h-dvh w-full max-w-[480px] bg-[linear-gradient(180deg,#efe8ff_0%,#ffffff_42%)] px-4 pb-8 pt-5">
+        <header className="mb-4 flex items-center justify-between">
+          <button className="grid h-10 w-10 place-items-center rounded-full bg-white text-slate-700 shadow-sm" onClick={() => navigate('/')} type="button">
+            <ArrowLeft className="h-5 w-5" />
           </button>
-          <div className='text-xs text-zinc-500'>结果展示</div>
+          <div className="rounded-full bg-white px-3 py-2 text-xs font-medium text-[#6d57d9] shadow-sm">结果页</div>
+        </header>
+
+        <section className="mb-4 rounded-lg bg-[#6d57d9] p-4 text-white shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-lg bg-white/16">
+              <Sparkles className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold">{title}</h1>
+              <p className="mt-1 text-xs text-white/75">结果已保存到历史记录，可继续生成新的场景。</p>
+            </div>
+          </div>
+        </section>
+
+        {!lastResult ? (
+          <div className="rounded-lg bg-white px-3 py-12 text-center text-sm text-slate-500 shadow-sm">还没有生成结果，请先从首页开始一次 AI 试穿。</div>
+        ) : null}
+
+        <div className="space-y-4">
+          {lastResult?.type === 'onboarding' ? <ImagePanel title="你的专属形象" url={lastResult.avatarUrl} /> : null}
+
+          {lastResult?.type === 'recommendation' ? (
+            <>
+              <div className="rounded-lg bg-white p-4 shadow-sm">
+                <div className="mb-2 text-sm font-semibold text-slate-950">穿搭建议</div>
+                <p className="text-sm leading-6 text-slate-600">{lastResult.stylingSuggestion}</p>
+                {lastResult.scene ? <div className="mt-3 rounded-full bg-[#f0e9ff] px-3 py-2 text-xs text-[#6d57d9]">{lastResult.scene}</div> : null}
+              </div>
+              <ImagePanel title="AI 商品图" url={lastResult.generatedProductUrl} />
+              <ImagePanel title="最终试穿效果" url={lastResult.finalTryonUrl} />
+            </>
+          ) : null}
+
+          {lastResult?.type === 'directTryon' ? (
+            <>
+              {lastResult.productUrl ? <ImagePanel title="试穿商品" url={lastResult.productUrl} /> : null}
+              <ImagePanel title="最终试穿效果" url={lastResult.finalTryonUrl} />
+            </>
+          ) : null}
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className='text-base'>{title}</CardTitle>
-            <CardDescription>你可以保存图片链接或重新发起试穿</CardDescription>
-          </CardHeader>
-          <CardContent className='space-y-4'>
-            {!lastResult ? (
-              <Alert>
-                <AlertTitle>还没有结果</AlertTitle>
-                <AlertDescription>请从需求收集页开始一次流程</AlertDescription>
-              </Alert>
-            ) : null}
-
-            {lastResult?.type === 'onboarding' ? (
-              <div className='space-y-2'>
-                <div className='text-sm font-medium text-zinc-900'>你的基底形象</div>
-                {canRenderUrl(lastResult.avatarUrl) && !imgError['avatar'] ? (
-                  <div className='overflow-hidden rounded-md border bg-zinc-100 flex items-center justify-center p-2 min-h-[300px]'>
-                    <img
-                      src={lastResult.avatarUrl}
-                      alt='avatar'
-                      className='max-h-[500px] w-auto object-contain drop-shadow-sm'
-                      onError={() => setImgError((p) => ({ ...p, avatar: true }))}
-                    />
-                  </div>
-                ) : (
-                  <div className='rounded-md border bg-zinc-50 px-3 py-2 text-xs text-zinc-700'>
-                    图片无法直接预览，你可以复制链接到浏览器打开：{lastResult.avatarUrl}
-                  </div>
-                )}
-                <LinkRow url={lastResult.avatarUrl} />
-              </div>
-            ) : null}
-
-            {lastResult?.type === 'recommendation' ? (
-              <div className='space-y-4'>
-                <div className='space-y-2'>
-                  <div className='text-sm font-medium text-zinc-900'>推荐建议</div>
-                  <div className='rounded-md border bg-white px-3 py-2 text-sm leading-6 text-zinc-800'>
-                    {lastResult.stylingSuggestion}
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className='space-y-2'>
-                  <div className='text-sm font-medium text-zinc-900'>AI 生成商品图</div>
-                  {canRenderUrl(lastResult.generatedProductUrl) && !imgError['product'] ? (
-                    <div className='overflow-hidden rounded-md border bg-zinc-100 flex items-center justify-center p-2 min-h-[300px]'>
-                      <img
-                        src={lastResult.generatedProductUrl}
-                        alt='product'
-                        className='max-h-[500px] w-auto object-contain drop-shadow-sm'
-                        onError={() => setImgError((p) => ({ ...p, product: true }))}
-                      />
-                    </div>
-                  ) : (
-                    <div className='rounded-md border bg-zinc-50 px-3 py-2 text-xs text-zinc-700'>
-                      图片无法直接预览：{lastResult.generatedProductUrl}
-                    </div>
-                  )}
-                  <LinkRow url={lastResult.generatedProductUrl} />
-                </div>
-
-                <Separator />
-
-                <div className='space-y-2'>
-                  <div className='text-sm font-medium text-zinc-900'>最终试穿效果</div>
-                  {canRenderUrl(lastResult.finalTryonUrl) && !imgError['tryon'] ? (
-                    <div className='overflow-hidden rounded-md border bg-zinc-100 flex items-center justify-center p-2 min-h-[300px]'>
-                      <img
-                        src={lastResult.finalTryonUrl}
-                        alt='tryon'
-                        className='max-h-[500px] w-auto object-contain drop-shadow-sm'
-                        onError={() => setImgError((p) => ({ ...p, tryon: true }))}
-                      />
-                    </div>
-                  ) : (
-                    <div className='rounded-md border bg-zinc-50 px-3 py-2 text-xs text-zinc-700'>
-                      图片无法直接预览：{lastResult.finalTryonUrl}
-                    </div>
-                  )}
-                  <div className='flex items-center gap-3'>
-                    <LinkRow url={lastResult.finalTryonUrl} />
-                    <a
-                      href={lastResult.finalTryonUrl}
-                      target='_blank'
-                      rel='noreferrer'
-                      className='inline-flex items-center gap-2 text-sm text-zinc-700 underline-offset-4 hover:underline'
-                    >
-                      <Download className='h-4 w-4' />
-                      保存
-                    </a>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {lastResult?.type === 'directTryon' ? (
-              <div className='space-y-2'>
-                <div className='text-sm font-medium text-zinc-900'>试穿效果图</div>
-                {canRenderUrl(lastResult.finalTryonUrl) && !imgError['directTryon'] ? (
-                  <div className='overflow-hidden rounded-md border bg-zinc-100 flex items-center justify-center p-2 min-h-[300px]'>
-                    <img
-                      src={lastResult.finalTryonUrl}
-                      alt='direct tryon'
-                      className='max-h-[500px] w-auto object-contain drop-shadow-sm'
-                      onError={() => setImgError((p) => ({ ...p, directTryon: true }))}
-                    />
-                  </div>
-                ) : (
-                  <div className='rounded-md border bg-zinc-50 px-3 py-2 text-xs text-zinc-700'>
-                    图片无法直接预览：{lastResult.finalTryonUrl}
-                  </div>
-                )}
-                <LinkRow url={lastResult.finalTryonUrl} />
-              </div>
-            ) : null}
-
-            <Separator />
-
-            <div className='flex gap-3'>
-              <Button
-                variant='secondary'
-                className='w-full'
-                onClick={() => {
-                  setLastResult(null)
-                  navigate('/')
-                }}
-              >
-                重新开始
-              </Button>
-              <Button className='w-full bg-black text-white hover:bg-neutral-800' onClick={() => navigate('/')}>继续试穿</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        <div className="mt-5 grid grid-cols-3 gap-2">
+          <Button className="rounded-full bg-white text-slate-700 hover:bg-slate-50" onClick={() => navigate('/')}>
+            <Home className="h-4 w-4" />
+            首页
+          </Button>
+          <Button
+            className="rounded-full bg-white text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              setLastResult(null)
+              navigate('/')
+            }}
+          >
+            <RotateCcw className="h-4 w-4" />
+            再试
+          </Button>
+          <Button
+            className="rounded-full bg-slate-950 text-white hover:bg-slate-800"
+            onClick={() => {
+              const url =
+                lastResult?.type === 'onboarding'
+                  ? lastResult.avatarUrl
+                  : lastResult?.type === 'recommendation'
+                    ? lastResult.finalTryonUrl
+                    : lastResult?.finalTryonUrl
+              if (url) window.open(url, '_blank')
+            }}
+          >
+            <Download className="h-4 w-4" />
+            打开
+          </Button>
+        </div>
+      </main>
     </div>
   )
 }
-
